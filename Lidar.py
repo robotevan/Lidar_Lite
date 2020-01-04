@@ -8,6 +8,8 @@ ACQ_COMMAND = 0x00 # W: 0x00 Reset all registers to default
                    # W: 0x04 Measure distance (Bias correction)
 STATUS = 0x01 # R: Status register of the device
 DISTANCE_OUTPUT = 0x8f # R: Distance measurement in cm (2 Bytes)
+VELOCITY_OUTPUT = 0x09 # R: Velocity measurement in cm/s (1 Byte, 2's complement)
+
 
 """
 Interface for the Garmin Lidar-Lite v3
@@ -30,10 +32,28 @@ class Lidar:
             self.bus.write_byte_data(DEFAULT_ADDRESS, ACQ_COMMAND, 0x03)
 
         # Wait for device to receive distance reading
-        while self.device_busy():pass
+        self.wait_for_ready()
         # Read HIGH and LOW distance registers
         distance = self.bus.read_i2c_block_data(DEFAULT_ADDRESS, DISTANCE_OUTPUT, 2)
         return distance[0] << 8 | distance[1] # combine both bytes
+
+    """
+    Read the velocity of an object
+    @:return int velocity in cm/s
+        positive = away from lidar
+        negative = towards lidar
+    """
+    def read_velocity(self):
+        # Take two distance measurements to store in registers
+        self.read_distance()
+        self.wait_for_ready()
+        self.read_distance()
+        # Read the velocity register (8 bits, 2's complement)
+        self.wait_for_ready()
+        velocity = self.bus.read_byte_data(DEFAULT_ADDRESS, VELOCITY_OUTPUT)
+        if velocity > 127:
+            velocity = (256 - velocity)*(-1)
+        return velocity
 
     """
     Read the STATUS register
@@ -48,10 +68,10 @@ class Lidar:
     """
     def device_status(self):
         # Read the STATUS register, bits 0-6 only
-        current_config = int(self.bus.read_byte_data(DEFAULT_ADDRESS, STATUS))
+        status = int(self.bus.read_byte_data(DEFAULT_ADDRESS, STATUS))
         # Convert to binary, fill rest with 0's
-        current_config = bin(current_config)[2:].zfill(7)
-        return [int(bit) for bit in str(current_config)]
+        status = bin(status)[2:].zfill(7)
+        return [int(bit) for bit in str(status)]
 
     """
     Check if the device is busy
@@ -61,3 +81,10 @@ class Lidar:
         # STATUS register bit 0 represents busy flag, 0 for ready, 1 for busy
         return self.device_status()[-1]
 
+    """
+    Wait for the device to be ready
+    """
+    def wait_for_ready(self):
+        while self.device_busy():
+            pass
+        return
