@@ -6,6 +6,7 @@ DEFAULT_ADDRESS = 0x62 # Address of the device
 ACQ_COMMAND = 0x00 # W: 0x00 Reset all registers to default
                    # W: 0x03 Measure distance (no correction)
                    # W: 0x04 Measure distance (Bias correction)
+ACQ_CONFIG_REG = 0x04 # R/W: Configuration of the device
 STATUS = 0x01 # R: Status register of the device
 DISTANCE_OUTPUT = 0x8f # R: Distance measurement in cm (2 Bytes)
 VELOCITY_OUTPUT = 0x09 # R: Velocity measurement in cm/s (1 Byte, 2's complement)
@@ -15,8 +16,14 @@ VELOCITY_OUTPUT = 0x09 # R: Velocity measurement in cm/s (1 Byte, 2's complement
 Interface for the Garmin Lidar-Lite v3
 """
 class Lidar:
-    def __init__(self):
-        self.bus = SMBus(1)
+    """
+    @:param SMBus, a bus for the device to use
+    """
+    def __init__(self, bus = None):
+        if bus is None:
+            self.bus = SMBus(1)
+        else:
+            self.bus = bus
 
     """ 
     Take one measurement in cm
@@ -30,7 +37,6 @@ class Lidar:
         else:
             # Write 0x03 to 0x00 for no bias correction
             self.bus.write_byte_data(DEFAULT_ADDRESS, ACQ_COMMAND, 0x03)
-
         # Wait for device to receive distance reading
         self.wait_for_ready()
         # Read HIGH and LOW distance registers
@@ -46,17 +52,63 @@ class Lidar:
     def read_velocity(self):
         # Take two distance measurements to store in registers
         self.read_distance()
-        self.wait_for_ready()
         self.read_distance()
         # Read the velocity register (8 bits, 2's complement)
-        self.wait_for_ready()
         velocity = self.bus.read_byte_data(DEFAULT_ADDRESS, VELOCITY_OUTPUT)
         if velocity > 127:
             velocity = (256 - velocity)*(-1)
         return velocity
 
     """
-    Read the STATUS register
+    Read the current configuration of the device
+    @:return list of ints, 7 bits
+        bit 6: 0 = Enable reference process
+               1 = Disable reference process
+        bit 5: 0 = Use default delay for burst
+               1 = Use custom delay from 0x45, HZ
+        bit 4: 0 = Enable reference filter
+               1 = Disable reference filter
+        bit 3: 0 = Enable measurement quick termination
+               1 = Disable measurement quick termination
+        bit 2: 0 = Use default reference acquisition
+               1 = Use custom  reference acquisition from 0x12
+        bits 1-0: 00 = Default PWM mode
+                  01 = Status output mode
+                  10 = Fixed delay PWM mode
+                  11 = Oscillator output mode (nominal 31.25kHz output)
+        default config = 0x08 (0001000)
+    """
+    def read_device_config(self):
+        config = int(self.bus.read_byte_data(DEFAULT_ADDRESS, ACQ_CONFIG_REG))
+        config = bin(config)[2:].zfill(7)
+        return [int(bit) for bit in str(config)]
+
+    """
+    Set the device config
+    @:param list of ints, provide all 7 bits for config register
+        bit 6: 0 = Enable reference process
+               1 = Disable reference process
+        bit 5: 0 = Use default delay for burst
+               1 = Use custom delay from 0x45, HZ
+        bit 4: 0 = Enable reference filter
+               1 = Disable reference filter
+        bit 3: 0 = Enable measurement quick termination
+               1 = Disable measurement quick termination
+        bit 2: 0 = Use default reference acquisition
+               1 = Use custom  reference acquisition from 0x12
+        bits 1-0: 00 = Default PWM mode
+                  01 = Status output mode
+                  10 = Fixed delay PWM mode
+                  11 = Oscillator output mode (nominal 31.25kHz output)
+        default config = 0x08 (0001000)
+    """
+    def write_device_config(self, bits):
+        bits = [str(bit) for bit in bits]
+        bits = int("".join(bits),2) # Convert to dec for i2c reg
+        self.bus.write_byte_data(DEFAULT_ADDRESS, ACQ_CONFIG_REG, bits)
+
+    """
+    Read the current status of the device
     :return: list of ints
         bit 6: Process error flag
         bit 5: Health flag
@@ -66,7 +118,7 @@ class Lidar:
         bit 1: Reference overflow flag
         bit 0: Busy flag
     """
-    def device_status(self):
+    def read_device_status(self):
         # Read the STATUS register, bits 0-6 only
         status = int(self.bus.read_byte_data(DEFAULT_ADDRESS, STATUS))
         # Convert to binary, fill rest with 0's
@@ -79,12 +131,11 @@ class Lidar:
     """
     def device_busy(self):
         # STATUS register bit 0 represents busy flag, 0 for ready, 1 for busy
-        return self.device_status()[-1]
+        return self.read_device_config()[-1]
 
     """
     Wait for the device to be ready
     """
     def wait_for_ready(self):
-        while self.device_busy():
-            pass
-        return
+        while self.device_busy(): pass
+
