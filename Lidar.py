@@ -10,6 +10,8 @@ STATUS = 0x01 # R: Status register of the device
 DISTANCE_OUTPUT = 0x8f # R: Distance measurement in cm (2 Bytes)
 VELOCITY_OUTPUT = 0x09 # R: Velocity measurement in cm/s (1 Byte, 2's complement)
 POWER_CONTROL = 0x65 # R/W: Configure power mode of the device
+SIG_COUNT_VAL = 0x02 # R/W: Max times a pulse can be sent
+
 
 """
 Interface for the Garmin Lidar-Lite v3
@@ -28,6 +30,7 @@ class Lidar:
     """ 
     Take one measurement in cm, if the receiver circuit is disabled, it will enable the circuit before 
     taking a distance measurement
+    If taking many measurements, it is recommended to take a bias corrected measurement every 100 readings
     @:param: bias_correction boolean, determines if measurement uses bias correction or not
     @:return int distance in cm
     """
@@ -146,6 +149,19 @@ class Lidar:
         while self.device_busy(): pass
 
     """
+    Set the maximum number of measurements the device can take before taking a reading
+    note: the device will not always take this amount, only if required
+          ex: surface is not very reflective, long distance
+    The lower the number, the faster the measurement, values can range from 30 to 255
+    @:param count max number of pulses (default 128) 
+    """
+    def maximum_acquisition_count(self, count):
+        if 30 < count < 255:
+            raise Exception("Value must be between 30 and 255")
+        self.bus.write_byte_data(DEFAULT_ADDRESS, SIG_COUNT_VAL, count)
+        print(self.bus.read_byte_data(DEFAULT_ADDRESS,SIG_COUNT_VAL))
+
+    """
     Turn the device receiver circuit on or off, This will save roughly 40mA
     Turning the receiver back on takes roughly the same amount of time as 
     receiving a measurement
@@ -160,3 +176,4 @@ class Lidar:
             # Disable the receiver circuit off
             self.is_on = False
             self.bus.write_byte_data(DEFAULT_ADDRESS, POWER_CONTROL, 0x81)
+
